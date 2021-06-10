@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning Course Project.Rmd"
+author: "Natalia Kuraeva"
+date: "6/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Practical Machine Lerning Course Project
+
+### Synopsis:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: (http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Loading libraries and the data
+
+```{r}
+library(caret)
+library(lattice)
+library(ggplot2)
+set.seed(375)
+```
+
+```{r}
+# Loading Data
+trainpml <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testpml <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+## Data Partitions and Cleaning
+```{r}
+# Data Partitioning
+trainpml$classe <- as.factor(trainpml$classe)
+training_sample <- createDataPartition(y=trainpml$classe, p=0.7, list=FALSE)
+training <- trainpml[training_sample, ]
+validation <- trainpml[-training_sample, ]
+```
+Cleaning data
+```{r}
+training <- training[,colMeans(is.na(training)) < .8] # Exclusion of data with a lot of undefined values
+nvz <- nearZeroVar(training) # Highlighting data with only zero (missing) values
+training <- training[,-nvz] # Exclusion of data whith a zero (missing) values
+training <- training[,-c(1:7)] # Exclusion of the first seven columns of data, since they carry formal information about the experimental conditions and cannot be considered as influencing the conclusions in this case.
+```
+Selection of the most significant variables for analysis. In this study, I am also going to compare the results of building machine learning models with corrected (due to correlation) and unadjusted predictors.
+```{r}
+correlationMatrix <- cor(training[, -52]) # Determine the significance of variables
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.5) 
+trainset <- training[, -highlyCorrelated] # Selection of the most significant variables for analysis
+```
+## Building Models
+Here it will be used three popular models: Decision Trees, Random Forest, Gradient Boosted Trees. First, set up control for training to use 3-fold cross validation.
+```{r}
+control <- trainControl(method="cv", number=3)
+```
+Decision Trees with CART(rpart). Build model.
+```{r}
+Model_cart<- train(classe ~ ., data=training, trControl=control, method='rpart') # Model with all predictors
+save(Model_cart, file = './ModelFitCART.RData')
+model_cart <- train(classe ~ ., data=trainset, trControl=control, method='rpart') # Reduced predictor model (based on correlation)
+save(model_cart, file = './ModelFitCARTredused.RData')
+```
+Gradient Boosting Trees (gbm). Build model.
+```{r, results="hide"}
+Model_gbm <- train(classe ~ ., data=training, trControl=control, method='gbm') # Model with all predictors
+save(Model_gbm, file='./ModelFitGBM.RData')
+model_gbm <- train(classe ~ ., data=trainset, trControl=control, method='gbm') # Reduced predictor model (based on correlation)
+save(model_gbm, file='./ModelFitGBMredused.RData')
+```
+Random Forest Decision Trees (rf). Built Model
+```{r}
+Model_rf <- train(classe ~ ., data=training, trControl=control, method='rf', data_out = FALSE) # Model with all predictors
+save(Model_rf, file='./ModelFitRF.RData')
+model_rf <- train(classe ~ ., data=trainset, trControl=control, method='rf', data_out = FALSE) # Reduced predictor model (based on correlation)
+save(model_rf, file='./ModelFitRFredused.RData')
+```
+The following is a calculation of the efficiency of using the constructed models for the data on which they were built, as well as for a set of data deferred for verification.
+```{r}
+# Calculating the accuracy of the adjusted data model (by correlation)
+predCART <- predict(model_cart)
+cmCART <- confusionMatrix(predCART, trainset$classe)
+AccuracyCART <- cmCART$overall[1]
+predGBM <- predict(model_gbm)
+cmGBM <- confusionMatrix(predGBM, trainset$classe)
+AccuracyGBM <- cmGBM$overall[1]
+predRF <- predict(model_rf)
+cmRF <- confusionMatrix(predRF, trainset$classe)
+AccuracyRF <- cmRF$overall[1]
+AccuracyTrain <- c(AccuracyCART, AccuracyGBM, AccuracyRF)
+# Calculating the accuracy of the non adjusted data model
+predCARTtrain <- predict(model_cart, newdata=training)
+cmCARTtrain <- confusionMatrix(predCARTtrain, training$classe)
+predGBMtrain <- predict(model_gbm, newdata=training)
+cmGBMtrain <- confusionMatrix(predGBMtrain, training$classe)
+predRFtrain <- predict(model_rf, newdata=training)
+cmRFtrain <- confusionMatrix(predRFtrain, training$classe)
+Accuracytrain <- c(cmCARTtrain$overall[1], cmGBMtrain$overall[1], cmRFtrain$overall[1])
+```
+Model estimation (error on validation set)
+```{r}
+# Calculating the model accuracy of the corrected data (by correlation) for the validation data
+variables <- variable.names(trainset) # Creating a list of variables to select from the dataset.
+validationset <- validation[, variables] # Selecting variables for the validation set.
+predCARTval <- predict(model_cart, newdata=validationset)
+cmCARTval <- confusionMatrix(predCARTval, validationset$classe)
+predGBMval <- predict(model_gbm, newdata=validationset)
+cmGBMval <- confusionMatrix(predGBMval, validationset$classe)
+predRFval <- predict(model_rf, newdata=validationset)
+cmRFval <- confusionMatrix(predRFval, validationset$classe)
+AccuracyVal <- c(cmCARTval$overall[1], cmGBMval$overall[1], cmRFval$overall[1])
+# Calculating the model accuracy of the  non corrected data (by correlation) for the validation data
+Variables <- variable.names(training)
+Validationset <- validation[, Variables]
+predCARTVal <- predict(Model_cart, newdata=Validationset)
+cmCARTVal <- confusionMatrix(predCARTVal, Validationset$classe)
+predGBMVal <- predict(Model_gbm, newdata=Validationset)
+cmGBMVal <- confusionMatrix(predGBMVal, Validationset$classe)
+predRFVal <- predict(Model_rf, newdata=Validationset)
+cmRFVal <- confusionMatrix(predRFVal, Validationset$classe)
+AccuracyVAL <- c(cmCARTVal$overall[1], cmGBMVal$overall[1], cmRFVal$overall[1])
+
+# creating a table for comparing models on training and validation data
+Model <- c('CART', 'GBM', 'RF')
+AccuracyResults <- data.frame(Model, AccuracyTrain, Accuracytrain, AccuracyVAL, AccuracyVal)
+names(AccuracyResults)[names(AccuracyResults) == "AccuracyTrain"] <- "Accuracy complete training data"
+names(AccuracyResults)[names(AccuracyResults) == "Accuracytrain"] <- "Accuracy reduced training data"
+names(AccuracyResults)[names(AccuracyResults) == "AccuracyVAL"] <- "Accuracy complete validation data"
+names(AccuracyResults)[names(AccuracyResults) == "AccuracyVal"] <- "Accuracy reduced validation data"
+print(AccuracyResults)
+```
+
+As can be seen from the table, the random forest model most accurately estimates the solution according to the given parameters.For greater clarity, you can see the tables below.
+```{r}
+print(cmRFVal)
+```
+It should be chosen as a model for test values.
+## Conclusion
+Finally, we get the following results:
+```{r}
+testset <- testpml[, Variables[-52]] # Selecting variables for the test set.
+print(predict(Model_rf, newdata=testset))
+```
